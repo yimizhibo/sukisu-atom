@@ -10,7 +10,7 @@ on:
       kernel_branch:
         description: 'Kernel source branch to build'
         required: true
-        default: 'main'
+        default: 'android-4.14-r-stable'
       defconfig:
         description: 'Defconfig name (e.g. atom_user_defconfig)'
         required: true
@@ -56,4 +56,3 @@ jobs:
           name: sukisu-atom-kernel
           path: artifact/
           if-no-files-found: error
-
