@@ -43,10 +43,14 @@ if [ "$TOOLCHAIN" = "clang" ]; then
   sed -i 's/clock_gettime_return,/clock_gettime_return/g' \
     arch/arm64/kernel/vdso/gettimeofday.S 2>/dev/null || true
 else
-  # GCC is the most reliable choice for 4.14 MTK; disable -Werror so a
-  # newer host GCC does not fail the build on new warnings.
+  # GCC is the most reliable choice for 4.14 MTK.
+  # - -Wno-error : a newer host GCC (>=10) turns new -Werror=* warnings
+  #   into hard failures; disable them so they stay warnings.
+  # - -fcommon   : GCC >=10 defaults to -fno-common, which breaks old
+  #   4.14 code that uses multiple tentative definitions with
+  #   "multiple definition of ..." errors. -fcommon restores the old behavior.
   MAKE_VARS="CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi-"
-  EXTRA_MAKE_FLAGS="$EXTRA_MAKE_FLAGS KCFLAGS=-Wno-error"
+  export KCFLAGS="-Wno-error -fcommon"
 fi
 
 # ---- integrate SukiSU-Ultra (in-tree, non-GKI) ----
@@ -88,9 +92,40 @@ echo "[*] Enabling CONFIG_KSU in $DEF..."
 # ---- build ----
 echo "[*] Building kernel (this can take 10-30 min)..."
 mkdir -p "$OUT_DIR"
-make -j"$(nproc)" ARCH=arm64 O="$OUT_DIR" $MAKE_VARS "$DEFCONFIG"
+LOG="$ROOT/build.log"
+: > "$LOG"
+
+echo "[*] (1/2) Generating defconfig '$DEFCONFIG'..."
+set +e
+make -j"$(nproc)" ARCH=arm64 O="$OUT_DIR" $MAKE_VARS "$DEFCONFIG" 2>&1 | tee -a "$LOG"
+DEF_RC=${PIPESTATUS[0]}
+set -e
+if [ "$DEF_RC" -ne 0 ]; then
+  echo "[!] Defconfig step failed (rc=$DEF_RC). Last 40 lines:"
+  tail -n 40 "$LOG"
+  exit "$DEF_RC"
+fi
+
+echo "[*] (2/2) Compiling kernel (Image.gz-dtb)..."
+set +e
 make -j"$(nproc)" ARCH=arm64 O="$OUT_DIR" $MAKE_VARS $EXTRA_MAKE_FLAGS \
-  Image.gz-dtb Image.gz Image 2>&1 | tail -n 60
+  Image.gz-dtb Image.gz Image 2>&1 | tee -a "$LOG"
+BUILD_RC=${PIPESTATUS[0]}
+set -e
+if [ "$BUILD_RC" -ne 0 ]; then
+  echo "=================================================="
+  echo "[!] BUILD FAILED (rc=$BUILD_RC). First errors found in log:"
+  echo "=================================================="
+  grep -nE "error:|Error [0-9]+|No such file or directory|undefined reference to|multiple definition of" "$LOG" | head -n 25
+  FIRST=$(grep -nE "error:" "$LOG" | head -1 | cut -d: -f1)
+  if [ -n "${FIRST:-}" ]; then
+    S=$((FIRST - 15)); [ "$S" -lt 1 ] && S=1
+    echo "----- context around first error (log line $FIRST) -----"
+    sed -n "${S},$((FIRST + 8))p" "$LOG"
+  fi
+  echo "[+] Full build log is printed above (search it for 'error:')."
+  exit "$BUILD_RC"
+fi
 
 # ---- collect artifacts ----
 echo "[*] Collecting artifacts..."
