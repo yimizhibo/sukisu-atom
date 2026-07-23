@@ -1,0 +1,59 @@
+name: Build SukiSU-Ultra (atom / Redmi 10X 5G)
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_repo:
+        description: 'Kernel source git URL (must be open-source & bootable)'
+        required: true
+        default: 'https://github.com/mt6873-dev/kernel_redmi_atom'
+      kernel_branch:
+        description: 'Kernel source branch to build'
+        required: true
+        default: 'main'
+      defconfig:
+        description: 'Defconfig name (e.g. atom_user_defconfig)'
+        required: true
+        default: 'atom_user_defconfig'
+      ksu_ref:
+        description: 'SukiSU-Ultra branch/tag/commit to integrate'
+        required: true
+        default: 'susfs-main'
+      toolchain:
+        description: 'gcc or clang'
+        required: true
+        default: 'gcc'
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout this builder repo
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex libssl-dev libelf-dev \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabi g++-arm-linux-gnueabi \
+            clang llvm lld git make ccache
+
+      - name: Build SukiSU-Ultra kernel
+        env:
+          KERNEL_REPO: ${{ github.event.inputs.kernel_repo || 'https://github.com/mt6873-dev/kernel_redmi_atom' }}
+          KERNEL_BRANCH: ${{ github.event.inputs.kernel_branch || 'android-4.14-r-stable' }}
+          DEFCONFIG: ${{ github.event.inputs.defconfig || 'atom_user_defconfig' }}
+          KSU_REF: ${{ github.event.inputs.ksu_ref || 'susfs-main' }}
+          TOOLCHAIN: ${{ github.event.inputs.toolchain || 'gcc' }}
+        run: bash ./build.sh
+
+      - name: Upload kernel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sukisu-atom-kernel
+          path: artifact/
+          if-no-files-found: error
+
